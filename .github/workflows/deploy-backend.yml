@@ -106,3 +106,4 @@ jobs:
               --registry-server "$ACR_NAME.azurecr.io" \
               --registry-username "$REG_USERNAME" \
               --registry-password "$REG_PASSWORD"
+          fi
