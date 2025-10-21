@@ -1,0 +1,108 @@
+name: Deploy Backend (Container Apps)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+  ACR_NAME: ${{ vars.ACR_NAME }}
+  ACA_ENV_NAME: ${{ vars.ACA_ENV_NAME }}
+  ACA_APP_NAME: ${{ vars.ACA_APP_NAME }}
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Ensure resource group
+        run: |
+          az group create \
+            --name "$AZURE_RESOURCE_GROUP" \
+            --location "$AZURE_LOCATION"
+
+      - name: Ensure ACR exists
+        run: |
+          if ! az acr show -n "$ACR_NAME" -g "$AZURE_RESOURCE_GROUP" >/dev/null 2>&1; then
+            az acr create -n "$ACR_NAME" -g "$AZURE_RESOURCE_GROUP" --sku Basic --location "$AZURE_LOCATION"
+          fi
+
+      - name: Ensure Container Apps extension
+        run: |
+          az extension add --name containerapp --upgrade
+          az provider register --namespace Microsoft.App
+          az provider register --namespace Microsoft.OperationalInsights
+
+      - name: Ensure Container Apps Environment
+        run: |
+          if ! az containerapp env show -n "$ACA_ENV_NAME" -g "$AZURE_RESOURCE_GROUP" >/dev/null 2>&1; then
+            az containerapp env create \
+              -n "$ACA_ENV_NAME" \
+              -g "$AZURE_RESOURCE_GROUP" \
+              -l "$AZURE_LOCATION"
+          fi
+
+      - name: Enable ACR admin and fetch credentials
+        id: acrcreds
+        run: |
+          az acr update -n "$ACR_NAME" --admin-enabled true
+          USERNAME=$(az acr credential show -n "$ACR_NAME" --query username -o tsv)
+          PASSWORD=$(az acr credential show -n "$ACR_NAME" --query passwords[0].value -o tsv)
+          echo "username=$USERNAME" >> $GITHUB_OUTPUT
+          echo "password=$PASSWORD" >> $GITHUB_OUTPUT
+
+      - name: Log in to ACR
+        run: |
+          az acr login -n "$ACR_NAME"
+
+      - name: Build and push backend image
+        run: |
+          IMAGE_TAG=$ACR_NAME.azurecr.io/sale-tracker-api:${{ github.sha }}
+          docker build -t "$IMAGE_TAG" backend
+          docker push "$IMAGE_TAG"
+
+      - name: Create or update Container App
+        env:
+          REG_USERNAME: ${{ steps.acrcreds.outputs.username }}
+          REG_PASSWORD: ${{ steps.acrcreds.outputs.password }}
+        run: |
+          IMAGE_TAG=$ACR_NAME.azurecr.io/sale-tracker-api:${{ github.sha }}
+          if ! az containerapp show -n "$ACA_APP_NAME" -g "$AZURE_RESOURCE_GROUP" >/dev/null 2>&1; then
+            az containerapp create \
+              -n "$ACA_APP_NAME" \
+              -g "$AZURE_RESOURCE_GROUP" \
+              -e "$ACA_ENV_NAME" \
+              --image "$IMAGE_TAG" \
+              --target-port 8000 \
+              --ingress external \
+              --registry-server "$ACR_NAME.azurecr.io" \
+              --registry-username "$REG_USERNAME" \
+              --registry-password "$REG_PASSWORD" \
+              --env-vars COSMOSDB_CONNECTION_STRING='${{ secrets.COSMOSDB_CONNECTION_STRING }}' ALLOWED_ORIGINS='${{ vars.SWA_HOSTNAME }}'
+          else
+            az containerapp update \
+              -n "$ACA_APP_NAME" \
+              -g "$AZURE_RESOURCE_GROUP" \
+              --image "$IMAGE_TAG" \
+              --set-env-vars COSMOSDB_CONNECTION_STRING='${{ secrets.COSMOSDB_CONNECTION_STRING }}' ALLOWED_ORIGINS='${{ vars.SWA_HOSTNAME }}' \
+              --ingress external \
+              --target-port 8000 \
+              --registry-server "$ACR_NAME.azurecr.io" \
+              --registry-username "$REG_USERNAME" \
+              --registry-password "$REG_PASSWORD"

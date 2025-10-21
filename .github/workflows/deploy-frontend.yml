@@ -1,0 +1,62 @@
+name: Deploy Frontend (Static Web Apps)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'staticwebapp.config.json'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  ACA_APP_NAME: ${{ vars.ACA_APP_NAME }}
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get backend FQDN
+        id: getfqdn
+        run: |
+          FQDN=$(az containerapp show -n "$ACA_APP_NAME" -g "$AZURE_RESOURCE_GROUP" --query "properties.configuration.ingress.fqdn" -o tsv || true)
+          if [ -n "$FQDN" ]; then
+            echo "fqdn=https://$FQDN" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Update SWA rewrite to backend FQDN (if available)
+        if: steps.getfqdn.outputs.fqdn != ''
+        run: |
+          BACKEND_FQDN="${{ steps.getfqdn.outputs.fqdn }}"
+          tmpfile=$(mktemp)
+          jq --arg url "$BACKEND_FQDN" \
+            '(.routes[] | select(.route=="/api/*") | .rewrite) = ($url + "/api/*")' \
+            staticwebapp.config.json > "$tmpfile"
+          mv "$tmpfile" staticwebapp.config.json
+        shell: bash
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: "/"        # project root contains package.json
+          output_location: "build"  # CRA build output
