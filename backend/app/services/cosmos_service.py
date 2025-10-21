@@ -25,33 +25,29 @@ class CosmosService:
         self.database = None
         self.container = None
         
-        # Use managed identity in production, connection string locally
-        if os.getenv("AZURE_CLIENT_ID"):
-            # Production with managed identity
-            credential = DefaultAzureCredential()
-            cosmos_endpoint = os.environ.get('COSMOSDB_ENDPOINT')
-            if not cosmos_endpoint:
-                raise ValueError("COSMOSDB_ENDPOINT environment variable is required for production")
-            self.client = CosmosClient(url=cosmos_endpoint, credential=credential)
-        else:
+        # Prefer explicit connection string for local/dev; otherwise use managed identity with endpoint
+        connection_string = os.environ.get('COSMOSDB_CONNECTION_STRING')
+        cosmos_endpoint = os.environ.get('COSMOSDB_ENDPOINT')
+
+        if connection_string:
             # Local development with connection string
-            connection_string = os.environ.get('COSMOSDB_CONNECTION_STRING')
-            if not connection_string:
-                raise ValueError("COSMOSDB_CONNECTION_STRING environment variable is required for local development")
-            
             # Check if connection string is a placeholder
             if "your-cosmosdb-account" in connection_string or "your-primary-key" in connection_string:
                 print("WARNING: Using placeholder Cosmos DB connection string. Please update .env file with real values.")
-                # Don't initialize the client yet - will fail gracefully
                 return
-            
+
             try:
                 self.client = CosmosClient.from_connection_string(connection_string)
             except Exception as e:
                 print(f"WARNING: Failed to connect to Cosmos DB: {e}")
                 print("Please check your COSMOSDB_CONNECTION_STRING in .env file")
-                # Don't raise the error - allow the app to start
                 return
+        elif cosmos_endpoint:
+            # Production with managed identity
+            credential = DefaultAzureCredential()
+            self.client = CosmosClient(url=cosmos_endpoint, credential=credential)
+        else:
+            raise ValueError("Set COSMOSDB_CONNECTION_STRING (local) or COSMOSDB_ENDPOINT (managed identity)")
         
         # Get database and container references
         if self.client:

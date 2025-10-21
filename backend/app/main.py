@@ -1,7 +1,7 @@
 """
 FastAPI main application for Sale Tracker API.
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import os
@@ -22,9 +22,15 @@ app = FastAPI(
 )
 
 # Configure CORS
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS")
+allow_origins = (
+    [origin.strip() for origin in allowed_origins_env.split(",")]
+    if allowed_origins_env else ["*"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -53,7 +59,7 @@ async def health_check():
 
 
 @app.get("/api/user")
-async def get_user_info(user: dict = get_current_user):
+async def get_user_info(user: dict = Depends(get_current_user)):
     """Get current user information."""
     return {
         "userId": user["userId"],
