@@ -87,7 +87,7 @@ jobs:
             az containerapp create \
               -n "$ACA_APP_NAME" \
               -g "$AZURE_RESOURCE_GROUP" \
-              -e "$ACA_ENV_NAME" \
+              --environment "$ACA_ENV_NAME" \
               --image "$IMAGE_TAG" \
               --target-port 8000 \
               --ingress external \
