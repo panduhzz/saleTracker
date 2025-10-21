@@ -1,0 +1,38 @@
+{
+  
+  "routes": [
+    {
+      "route": "/api/*",
+      "allowedRoles": ["authenticated"],
+      "rewrite": "https://sale-tracker-api.victoriousocean-90ca6df8.eastus.azurecontainerapps.io/*"
+    },
+    {
+      "route": "/",
+      "serve": "/index.html",
+      "statusCode": 200
+    },
+    {
+      "route": "/*",
+      "serve": "/index.html",
+      "statusCode": 200
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/images/*.{png,jpg,jpeg}", "/css/*", "/api/*"]
+  },
+  "auth": {
+    "identityProviders": {
+      "github": {
+        "registration": {
+          "openIdIssuer": "https://token.actions.githubusercontent.com",
+          "clientIdSettingName": "GITHUB_CLIENT_ID",
+          "clientSecretSettingName": "GITHUB_CLIENT_SECRET"
+        }
+      }
+    }
+  },
+  "platform": {
+    "apiRuntime": "node:18"
+  }
+}
